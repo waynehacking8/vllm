@@ -426,10 +426,9 @@ def test_reshape_and_cache_flash(
             )
             return result_hnd.permute(0, 2, 1, 3)  # back to [B, N, H, dim]
 
-        # The kernel writes K scales linearly on every arch and V scales in
-        # the 4x4 swizzle of the SM100 trtllm-gen reader. The FlashInfer
-        # reader used on SM12x expects linear V scales as well.
-        v_scales_swizzled = not current_platform.is_device_capability_family(120)
+        # The kernel writes K scales linearly and V scales in the 4x4 swizzle
+        # of the SM100 trtllm-gen reader, on every arch. SM12x does not use
+        # this kernel: it writes NVFP4 KV through FlashInfer's fa2 path.
         result_key_cache = dequant_nvfp4_cache(
             nvfp4_key_data, key_scale_cache, k_scale.item(), swizzled_scales=False
         )
@@ -437,7 +436,7 @@ def test_reshape_and_cache_flash(
             nvfp4_value_data,
             value_scale_cache,
             v_scale.item(),
-            swizzled_scales=v_scales_swizzled,
+            swizzled_scales=True,
         )
 
         # Flatten [num_blocks, block_size] → [num_slots] and index by slot_mapping.
