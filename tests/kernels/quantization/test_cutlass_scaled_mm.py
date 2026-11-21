@@ -18,6 +18,13 @@ from vllm.utils.math_utils import cdiv
 if not current_platform.is_cuda():
     pytest.skip("These tests use CUTLASS which requires CUDA", allow_module_level=True)
 
+# The SM100 and SM120 cutlass_scaled_mm builds have no int8 kernel, and
+# cutlass_scaled_mm_azp has no SM100+ path.
+requires_cutlass_int8 = pytest.mark.skipif(
+    current_platform.has_device_capability(100),
+    reason="CUTLASS int8 scaled_mm is not supported on SM100 and newer",
+)
+
 MNK_FACTORS = [
     (1, 256, 128),
     (1, 16384, 1024),
@@ -260,6 +267,7 @@ def test_cutlass_fp8_blockwise_scale_gemm(
     cutlass_fp8_gemm_helper(m, n, k, a_scale_group_shape, b_scale_group_shape, use_bias)
 
 
+@requires_cutlass_int8
 @pytest.mark.parametrize("m,n,k", MNK_FACTORS)
 @pytest.mark.parametrize(
     "a_scale_group_shape", [PER_TOKEN_GROUP_SHAPE, TENSORWISE_GROUP_SHAPE]
@@ -276,6 +284,7 @@ def test_cutlass_int8_gemm(
     )
 
 
+@requires_cutlass_int8
 @pytest.mark.parametrize(
     "a_scale_group_shape", [PER_TOKEN_GROUP_SHAPE, TENSORWISE_GROUP_SHAPE]
 )
@@ -383,6 +392,7 @@ def test_cutlass_fp8_gemm_devices(
     )
 
 
+@requires_cutlass_int8
 @pytest.mark.parametrize(
     "a_scale_group_shape", [PER_TOKEN_GROUP_SHAPE, TENSORWISE_GROUP_SHAPE]
 )
@@ -432,6 +442,7 @@ def test_cutlass_fp8_gemm_m_sweep(
             )
 
 
+@requires_cutlass_int8
 @pytest.mark.parametrize(
     "a_scale_group_shape", [PER_TOKEN_GROUP_SHAPE, TENSORWISE_GROUP_SHAPE]
 )
@@ -498,6 +509,7 @@ def test_cutlass_int8_azp_bias_fold(m: int, n: int, k: int, out_dtype: torch.dty
     torch.testing.assert_close(out, baseline_q, rtol=1e-2, atol=1e0)
 
 
+@requires_cutlass_int8
 @pytest.mark.parametrize("m", [32, 64, 128])
 @pytest.mark.parametrize("n", [16, 32, 64])
 @pytest.mark.parametrize("k", [64, 128, 256])
@@ -614,6 +626,7 @@ class CutlassLayer(torch.nn.Module):
         )
 
 
+@requires_cutlass_int8
 @pytest.mark.parametrize("per_act_token", [True, False])
 @pytest.mark.parametrize("per_out_ch", [True, False])
 def test_cutlass_cuda_graph(per_act_token: bool, per_out_ch: bool):
