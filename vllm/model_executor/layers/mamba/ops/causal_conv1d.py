@@ -98,6 +98,11 @@ def _causal_conv1d_fwd_kernel(  # continuous batching
         conv_state_indices_ptr + idx_seq * stride_cache_indices
     ).to(tl.int64)
 
+    if conv_states_input_coord == pad_slot_id:
+        # not processing as this is a padded entry
+        if launch_pdl:
+            tl.extra.cuda.gdc_launch_dependents()
+        return
     if HAS_NULL_BLOCK:  # noqa
         if conv_states_input_coord == null_block_id:
             # not processing as this is a null block (padding)

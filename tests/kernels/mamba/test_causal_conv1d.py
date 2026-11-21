@@ -15,7 +15,7 @@ from vllm.model_executor.layers.mamba.ops.causal_conv1d import (
 )
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import set_random_seed
-from vllm.v1.attention.backends.utils import NULL_BLOCK_ID
+from vllm.v1.attention.backends.utils import NULL_BLOCK_ID, PAD_SLOT_ID
 
 DEVICE = current_platform.device_type
 
@@ -379,6 +379,51 @@ def test_causal_conv1d_varlen(
     )
     unpadded_out = out[:, : out_ref_tensor.shape[-1]]
     assert torch.allclose(unpadded_out, out_ref_tensor, rtol=rtol, atol=atol)
+
+
+@pytest.mark.parametrize("width", [2, 4])
+def test_causal_conv1d_varlen_skips_pad_slot_id(width):
+    # A cache index equal to pad_slot_id marks a padded sequence, so its conv
+    # state must be neither read nor written. The state view starts one row
+    # into its storage: a -1 index used as an offset would hit the guard row.
+    set_random_seed(0)
+    dim, seqlens = 64, [5, 3, 4]
+    backing = torch.randn(4, width - 1, dim, device=DEVICE).transpose(1, 2)
+    states = backing[1:]
+    guard = backing[0].clone()
+    states_ref = states.clone()
+    x = torch.randn(sum(seqlens), dim, device=DEVICE).T
+    x_ref = x.clone()
+    weight = torch.randn(dim, width, device=DEVICE)
+    query_start_loc = torch.tensor([0, 5, 8, 12], dtype=torch.int32, device=DEVICE)
+    cache_indices = torch.tensor([PAD_SLOT_ID, 1, 2], dtype=torch.int32, device=DEVICE)
+    has_initial_state = torch.ones(3, dtype=torch.bool, device=DEVICE)
+
+    out = causal_conv1d_fn(
+        x,
+        weight,
+        bias=None,
+        conv_states=states,
+        query_start_loc=query_start_loc,
+        cache_indices=cache_indices,
+        has_initial_state=has_initial_state,
+        activation=None,
+        pad_slot_id=PAD_SLOT_ID,
+    )
+
+    torch.testing.assert_close(backing[0], guard, rtol=0, atol=0)
+    for i in (1, 2):
+        start, end = int(query_start_loc[i]), int(query_start_loc[i + 1])
+        idx = int(cache_indices[i])
+        out_ref, final_ref = causal_conv1d_ref(
+            x_ref[:, start:end].unsqueeze(0),
+            weight,
+            initial_states=states_ref[idx].unsqueeze(0),
+            return_final_states=True,
+            activation=None,
+        )
+        torch.testing.assert_close(out[:, start:end], out_ref[0])
+        torch.testing.assert_close(states[idx], final_ref[0])
 
 
 @pytest.mark.parametrize("itype", [torch.bfloat16])
